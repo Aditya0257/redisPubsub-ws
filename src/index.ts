@@ -22,23 +22,31 @@ wss.on("connection", async function connection(ws) {
     console.error(error);
   });
 
-  const id = uuidv4();
+  // When a WebSocket connection is first established, the server sets up a context for that specific connection.
+  // This is where we generate the id and perform any other initialization tasks.
+  // Anything we define outside of the ws.on("message") block, but within the wss.on('connection', ...) block,
+  // persists for the entire duration of that WebSocket connection.
+
+  const id = uuidv4(); // Persisted for this connection
   console.log("client connected");
 
   ws.on("message", function incoming(message) {
     const data = JSON.parse(message.toString());
     if (data.type === "join") {
-      // user is joining for the first time, we are currently using in-memory data of node.js process to store users
+      // The user is joining for the first time. We generate a unique `id` for this user
+      // and store their WebSocket connection and room information in Node.js's in-memory data.
       users[id] = {
         room: data.payload.roomId,
         ws,
       };
-      // In case, this is the first user in this roomId, then wss with which this userId connects, needs to subscribe, we put all if else subscribe logic
-      // in redis singleton pattern class
+      // If this is the first user in the specified room, the WebSocket server subscribes to that room in Redis.
+      // This subscription call is made only once when the first user joins the room.
+      // The server remains subscribed to that room until the connection is closed or the last user leaves.
       RedisClient.getInstance().subscribe(id, data.payload.roomId, ws);
     } else if (data.type === "message") {
-      // some user is sending message in their respective room, we need to publish this message to redis pubsub, which will then automatically run subscribe
-      // callback using redisClient, and the subscribed message will run in that ws server, where all room websocket connections will get this message.
+      // When a user sends a message, we retrieve their stored `id` and use it to find which room they are in.
+      // We then publish the message to that room via Redis Pub/Sub.
+      // The RedisClient handles sending the message to all WebSocket connections subscribed to that room.
       const roomId = users[id].room;
       const message = data.payload.message;
       RedisClient.getInstance().publish(roomId, message);
